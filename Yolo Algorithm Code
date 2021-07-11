@@ -1,0 +1,112 @@
+# Importing necessary libraries
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+import time
+#coco names loading
+labels = open('../input/yolo-coco-data/coco.names').read().strip().split('\n')  # list of names
+# paths for weight and configuration
+weights_path = '../input/yolo-coco-data/yolov3.weights'
+config_path = '../input/yolo-coco-data/yolov3.cfg'
+# Setting minimum probability to eliminate weak predictions
+min_prob = 0.5
+# Setting threshold for non maximum suppression
+threshold = 0.3
+
+
+#model training.
+model = cv2.dnn.readNetFromDarknet(config_path, weights_path)
+# Getting names of all layers
+layers_names = model.getLayerNames() 
+# Getting only output layers' names that we need from YOLO algorithm
+output_layers = [layers_names[i[0] - 1] for i in model.getUnconnectedOutLayers()]  # list of layers' names
+
+#loading input image to pridict
+image_input = cv2.imread('../input/test-images/download (1).jpg')
+# Getting image shape
+image_input_shape = image_input.shape
+
+blob = cv2.dnn.blobFromImage(image_input, 1 / 255.0, (416, 416), swapRB=True, crop=False)
+blob_to_show = blob[0, :, :, :].transpose(1, 2, 0)
+
+
+# time calculation
+model.setInput(blob)  # setting blob as input to the network
+start = time.time()
+model_output = model.forward(output_layers)
+end = time.time()
+
+# colors for detected objects 
+np.random.seed(42)
+# randint(low, high=None, size=None, dtype='l')
+colours = np.random.randint(0, 255, size=(len(labels), 3), dtype='uint8')
+# Preparing lists for detected bounding boxes, obtained confidences and class's number
+bounding_boxes = []
+confidences = []
+class_numbers = []
+
+# Getting spacial dimension of input image
+h, w = image_input_shape[:2]
+
+
+for result in model_output:
+    # Going through all detections from current output layer
+    for detection in result:
+        # Getting class for current object
+        scores = detection[5:]
+        class_current = np.argmax(scores)
+
+        # Getting confidence (probability) for current object
+        confidence_current = scores[class_current]
+
+        # Eliminating weak predictions by minimum probability
+        if confidence_current > min_prob:
+            box_current = detection[0:4] * np.array([w, h, w, h])
+            # From current box with YOLO format getting top left corner coordinates
+            x_center, y_center, box_width, box_height = box_current.astype('int')
+            x_min = int(x_center - (box_width / 2))
+            y_min = int(y_center - (box_height / 2))
+
+            # Adding results into prepared lists
+            bounding_boxes.append([x_min, y_min, int(box_width), int(box_height)])
+            confidences.append(float(confidence_current))
+            class_numbers.append(class_current)
+            
+            
+         
+# implementing non maximum supppppression of boxes and correspoding scores
+results = cv2.dnn.NMSBoxes(bounding_boxes, confidences, min_prob, threshold)
+
+# Saving found labels
+with open('found_labels.txt', 'w') as f:
+    for i in range(len(class_numbers)):
+        f.write(labels[int(class_numbers[i])])
+
+# check weather any object detected or not 
+if len(results) > 0:
+    # Going through indexes of results
+    for i in results.flatten():
+        # Getting current bounding box coordinates
+        x_min, y_min = bounding_boxes[i][0], bounding_boxes[i][1]
+        box_width, box_height = bounding_boxes[i][2], bounding_boxes[i][3]
+
+        # Preparing colour for current bounding box
+        colour_box_current = [int(j) for j in colours[class_numbers[i]]]
+
+        # Drawing bounding box on the original image
+        cv2.rectangle(image_input, (x_min, y_min), (x_min + box_width, y_min + box_height),
+                      colour_box_current, 5)
+
+        # Preparing text with label and confidence for current bounding box
+        text_box_current = '{}: {:.4f}'.format(labels[int(class_numbers[i])], confidences[i])
+
+        # Putting text with label and confidence on the original image
+        cv2.putText(image_input, text_box_current, (x_min, y_min - 7), cv2.FONT_HERSHEY_SIMPLEX,
+                    1.5, colour_box_current, 5)
+                    
+                    
+# showing image with detected objects 
+%matplotlib inline
+plt.rcParams['figure.figsize'] = (10.0, 10.0)
+plt.imshow(cv2.cvtColor(image_input, cv2.COLOR_BGR2RGB))
+plt.show()
